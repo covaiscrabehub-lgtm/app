@@ -78,8 +78,8 @@ input:focus{outline:none;border-color:var(--green);box-shadow:0 0 0 3px rgba(16,
 <div id="toast" class="toast"></div>
 
 <script type="module">
-import {initializeApp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import {getDatabase,ref,onValue,set,update,remove} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+import {initializeApp} from "https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js";
+import {getDatabase,ref,onValue,set,update,remove} from "https://www.gstatic.com/firebasejs/12.18.0/firebase-database.js";
 
 const firebaseConfig={
  apiKey:"AIzaSyCAVdbE2YfcRUEizM9qhp3HMAdY2fEDUsc",
@@ -125,36 +125,40 @@ function toast(msg){
 function slug(s){return String(s).toLowerCase().trim().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"")||Date.now().toString()}
 
 async function ensureDefaults(){
- const snap=await new Promise(resolve=>onValue(ratesRef,resolve,{onlyOnce:true}));
+ const snap=await new Promise((resolve,reject)=>{
+   onValue(ratesRef,resolve,error=>reject(error),{onlyOnce:true});
+ });
  const current=snap.val()||{};
  const existing=current.rates||{};
- const rates={...existing};
+ const rates={};
  let changed=false;
 
- /* Migrate the old admin key "steel" to the shared customer key. */
- if(!rates.Stainlesssteelsteel && rates.steel){
-   rates.Stainlesssteelsteel={
-     name:rates.steel.name||"Stainless Steel Scrap",
-     price:Number(rates.steel.price)||0,
-     unit:rates.steel.unit||"kg"
-   };
-   delete rates.steel;
-   changed=true;
- }
-
- /* Remove the old admin-only brass key so both pages use the same IDs. */
- if(Object.prototype.hasOwnProperty.call(rates,"brass")){
-   delete rates.brass;
-   changed=true;
- }
-
- /* Make sure every customer material exists in the same RTDB structure. */
+ /* Keep ONLY the exact shared material IDs used by customer.html. */
  defaults.forEach(x=>{
-   if(!Object.prototype.hasOwnProperty.call(rates,x.id)){
+   const old=existing[x.id];
+   if(old && typeof old === "object"){
+     rates[x.id]={
+       name:old.name||x.name,
+       price:Number.isFinite(Number(old.price)) ? Number(old.price) : x.price,
+       unit:old.unit||x.unit
+     };
+   }else{
      rates[x.id]={name:x.name,price:x.price,unit:x.unit};
-     changed=true;
    }
  });
+
+ const oldKeys=Object.keys(existing);
+ const newKeys=Object.keys(rates);
+ if(oldKeys.length!==newKeys.length || oldKeys.some(k=>!Object.prototype.hasOwnProperty.call(rates,k))){
+   changed=true;
+ }
+ for(const id of newKeys){
+   const a=existing[id],b=rates[id];
+   if(!a || typeof a!="object" || Number(a.price)!==Number(b.price) || a.name!==b.name || a.unit!==b.unit){
+     changed=true;
+     break;
+   }
+ }
 
  if(changed || !snap.exists() || !current.rates){
    await set(ratesRef,{
@@ -211,9 +215,14 @@ document.getElementById("addBtn").onclick=async()=>{
  const price=parseFloat(document.getElementById("materialPrice").value);
  const unit=document.getElementById("materialUnit").value.trim()||"kg";
  if(!name||!Number.isFinite(price)||price<0){toast("Enter material and valid price");return}
- const id=slug(name)+"-"+Date.now();
+ const match=defaults.find(x=>x.name.toLowerCase()===name.toLowerCase() || x.id.toLowerCase()===name.toLowerCase());
+ if(!match){
+   toast("Use one of the existing shared materials");
+   return;
+ }
+ const id=match.id;
  try{
-   await update(ref(db,"scrapRates"),{[`rates/${id}`]:{name,price,unit},lastUpdated:new Date().toISOString()});
+   await update(ref(db,"scrapRates"),{[`rates/${id}`]:{name:match.name,price,unit},lastUpdated:new Date().toISOString()});
    document.getElementById("materialName").value="";
    document.getElementById("materialPrice").value="";
    document.getElementById("materialUnit").value="kg";
