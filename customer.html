@@ -4422,17 +4422,15 @@ body.dark-mode .settings-options button:hover{
 
 <script type="module">
 
-<script type="module">
-
 import {
     initializeApp
-} from "https://www.gstatic.com/firebasejs/12.1.0/firebase-app.js";
+} from "https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js";
 
 import {
     getDatabase,
     ref,
     onValue
-} from "https://www.gstatic.com/firebasejs/12.1.0/firebase-database.js";
+} from "https://www.gstatic.com/firebasejs/12.18.0/firebase-database.js";
 
 /* =====================================================
    FIREBASE CONFIG — NEW COVAISCRAP PROJECT
@@ -4481,16 +4479,10 @@ window.firebaseRef =
 window.firebaseOnValue =
     onValue;
 
-if(window.startScrapApp){
+window.firebaseReady = true;
 
+if (typeof window.startScrapApp === "function") {
     window.startScrapApp();
-
-}
-else{
-
-    window.firebaseReady =
-        true;
-
 }
 
 </script>
@@ -4691,93 +4683,54 @@ function startFirebaseRateListeners(){
         !window.firebaseRef ||
         !window.firebaseOnValue
     ){
-
-        console.error(
-            "Firebase is not connected."
-        );
-
+        console.error("Firebase is not connected.");
         return;
-
     }
 
-    const rateRef =
-        window.firebaseRef(
-            window.firebaseDB,
-            "scrapRates"
-        );
+    /* EXACT SHARED RTDB PATH USED BY admin-rates.html:
+       scrapRates/rates/{materialId} */
+    const rateRef = window.firebaseRef(
+        window.firebaseDB,
+        "scrapRates/rates"
+    );
 
     window.firebaseOnValue(
         rateRef,
         function(snapshot){
 
-            if(!snapshot.exists()){
+            const rates = snapshot.exists()
+                ? (snapshot.val() || {})
+                : {};
 
-                console.log(
-                    "Rate data not found"
-                );
+            console.log("COVAI SCRAP HUB rates loaded:", rates);
 
-                return;
+            /* Always update every product so a missing/empty database
+               never leaves the customer page stuck on 'Rate updating...'. */
+            materials.forEach(function(material){
 
-            }
+                const rateData = rates[material.id];
 
-            const data =
-                snapshot.val() || {};
+                const rate = Number(
+                    rateData && typeof rateData === "object"
+                        ? rateData.price
+                        : rateData
+                ) || 0;
 
-            console.log("COVAI SCRAP HUB rates loaded:", data);
-
-            /*
-               SHARED RATE STRUCTURE — SAME AS admin-rates.html
-
-               scrapRates
-                 └── rates
-                     └── {exact material ID}
-                         ├── name
-                         ├── price
-                         └── unit
-
-               No Firestore data and no old rate IDs are used here.
-            */
-            const rates =
-                data.rates || {};
-
-            materials.forEach(
-                function(material){
-
-                    const rateData =
-                        rates[material.id];
-
-                    const rate =
-                        Number(
-                            rateData && typeof rateData === "object"
-                                ? rateData.price
-                                : rateData
-                        ) || 0;
-
-                    firebaseRates[
-                        material.id
-                    ] = rate;
-
-                    updateProductRate(
-                        material.id,
-                        rate
-                    );
-
-                }
-            );
-
+                firebaseRates[material.id] = rate;
+                updateProductRate(material.id, rate);
+            });
         },
         function(error){
+            console.error("Firebase Error:", error);
 
-            console.error(
-                "Firebase Error:",
-                error
-            );
-
+            /* Stop the endless loading state when Firebase rejects the read. */
+            materials.forEach(function(material){
+                firebaseRates[material.id] = 0;
+                updateProductRate(material.id, 0);
+            });
         }
     );
-
 }
-
 
 /* =====================================================
    RENDER PRODUCTS
