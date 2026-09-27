@@ -4723,19 +4723,47 @@ function startFirebaseRateListeners(){
             const data =
                 snapshot.val() || {};
 
+            console.log("COVAI SCRAP HUB rates loaded:", data);
+
+            /*
+               Rates are stored by admin-rates.html as:
+               scrapRates / rates / {materialId} / price
+
+               Keep compatibility with older rate data too, including
+               the old "steel" id used by the admin defaults.
+            */
             const rates =
-                data.rates || {};
+                data.rates || data;
 
             materials.forEach(
                 function(material){
 
-                    const rateData =
+                    let rateData =
                         rates[material.id];
+
+                    /* Customer page uses Stainlesssteelsteel,
+                       while the existing admin default uses steel. */
+                    if(
+                        !rateData &&
+                        material.id === "Stainlesssteelsteel"
+                    ){
+                        rateData =
+                            rates.steel;
+                    }
+
+                    /* Accept a few legacy naming variations safely. */
+                    if(
+                        !rateData &&
+                        material.id === "ewaste"
+                    ){
+                        rateData =
+                            rates.eWaste || rates.e_waste;
+                    }
 
                     const rate =
                         Number(
-                            typeof rateData === "object"
-                                ? rateData?.price
+                            rateData && typeof rateData === "object"
+                                ? (rateData.price ?? rateData.rate ?? rateData.value)
                                 : rateData
                         ) || 0;
 
