@@ -93,17 +93,22 @@ const firebaseConfig={
 };
 const app=initializeApp(firebaseConfig),db=getDatabase(app),ratesRef=ref(db,"scrapRates");
 
+/* =========================================================
+   SHARED RATE IDS
+   These IDs MUST match customer.html exactly.
+========================================================= */
 const defaults=[
- {id:"steel",name:"Steel Scrap",price:45,unit:"kg",emoji:"🔩"},
+ {id:"Stainlesssteelsteel",name:"Stainless Steel Scrap",price:45,unit:"kg",emoji:"🔩"},
  {id:"paper",name:"Paper Scrap",price:12,unit:"kg",emoji:"📰"},
  {id:"aluminium",name:"Aluminium Scrap",price:85,unit:"kg",emoji:"🥫"},
  {id:"copper",name:"Copper Scrap",price:420,unit:"kg",emoji:"🔶"},
- {id:"plastic",name:"Plastic Scrap",price:8,unit:"kg",emoji:"📦"},
- {id:"brass",name:"Brass Scrap",price:320,unit:"kg",emoji:"🔔"},
  {id:"iron",name:"Iron Scrap",price:25,unit:"kg",emoji:"⚙️"},
  {id:"battery",name:"Old Battery",price:50,unit:"kg",emoji:"🔋"},
+ {id:"plastic",name:"Plastic Scrap",price:8,unit:"kg",emoji:"📦"},
+ {id:"vehicle",name:"Old Vehicle",price:35000,unit:"unit",emoji:"🚗"},
+ {id:"tyre",name:"Tyre Waste",price:0,unit:"kg",emoji:"🛞"},
  {id:"ewaste",name:"E-Waste",price:15,unit:"kg",emoji:"💻"},
- {id:"vehicle",name:"Old Vehicle",price:35000,unit:"unit",emoji:"🚗"}
+ {id:"mixed",name:"Mixed Scrap",price:0,unit:"kg",emoji:"♻️"}
 ];
 const emojiMap=Object.fromEntries(defaults.map(x=>[x.id,x.emoji]));
 
@@ -121,9 +126,42 @@ function slug(s){return String(s).toLowerCase().trim().replace(/[^a-z0-9]+/g,"-"
 
 async function ensureDefaults(){
  const snap=await new Promise(resolve=>onValue(ratesRef,resolve,{onlyOnce:true}));
- if(snap.exists() && snap.val()?.rates)return;
- const rates={};defaults.forEach(x=>rates[x.id]={name:x.name,price:x.price,unit:x.unit});
- await set(ratesRef,{rates,lastUpdated:new Date().toISOString()});
+ const current=snap.val()||{};
+ const existing=current.rates||{};
+ const rates={...existing};
+ let changed=false;
+
+ /* Migrate the old admin key "steel" to the shared customer key. */
+ if(!rates.Stainlesssteelsteel && rates.steel){
+   rates.Stainlesssteelsteel={
+     name:rates.steel.name||"Stainless Steel Scrap",
+     price:Number(rates.steel.price)||0,
+     unit:rates.steel.unit||"kg"
+   };
+   delete rates.steel;
+   changed=true;
+ }
+
+ /* Remove the old admin-only brass key so both pages use the same IDs. */
+ if(Object.prototype.hasOwnProperty.call(rates,"brass")){
+   delete rates.brass;
+   changed=true;
+ }
+
+ /* Make sure every customer material exists in the same RTDB structure. */
+ defaults.forEach(x=>{
+   if(!Object.prototype.hasOwnProperty.call(rates,x.id)){
+     rates[x.id]={name:x.name,price:x.price,unit:x.unit};
+     changed=true;
+   }
+ });
+
+ if(changed || !snap.exists() || !current.rates){
+   await set(ratesRef,{
+     rates,
+     lastUpdated:new Date().toISOString()
+   });
+ }
 }
 
 function render(data){
