@@ -4421,57 +4421,81 @@ body.dark-mode .settings-options button:hover{
 ===================================================== -->
 
 <script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js";
+
+import {
+    initializeApp
+}
+from "https://www.gstatic.com/firebasejs/12.1.0/firebase-app.js";
+
+
 import {
     getFirestore,
     doc,
     onSnapshot
-} from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
+}
+from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
+
 
 /* =====================================================
-   FIRESTORE — SHARED SCRAP RATES
-   Admin and Customer read the SAME Firestore document.
+   FIREBASE CONFIG
 ===================================================== */
+
 const firebaseConfig = {
-    apiKey: "AIzaSyApJhYmo0pHNqVD0XIyOlQDqDzACztPdHA",
-    authDomain: "covai-scrap-hub.firebaseapp.com",
-    projectId: "covai-scrap-hub",
-    storageBucket: "covai-scrap-hub.firebasestorage.app",
-    messagingSenderId: "979133721874",
-    appId: "1:979133721874:web:c5829bb8dbf5270c0917cb",
-    measurementId: "G-P3PTSBHWMF"
+
+    apiKey:
+        "AIzaSyApJhYmo0pHNqVD0XIyOlQDqDzACztPdHA",
+
+    authDomain:
+        "covai-scrap-hub.firebaseapp.com",
+
+    projectId:
+        "covai-scrap-hub",
+
+    storageBucket:
+        "covai-scrap-hub.firebasestorage.app",
+
+    messagingSenderId:
+        "979133721874",
+
+    appId:
+        "1:979133721874:web:c5829bb8dbf5270c0917cb",
+
+    measurementId:
+        "G-P3PTSBHWMF"
+
 };
 
-const app = initializeApp(firebaseConfig);
-const firestore = getFirestore(app);
-const ratesDocRef = doc(firestore, "covai hub", "f9k5K0JaYiXmE8aZ5vdf");
 
-/* Keep the existing app startup contract. */
-window.firebaseDB = firestore;
-window.firebaseReady = true;
+const app =
+    initializeApp(firebaseConfig);
 
-if (typeof window.startScrapApp === "function") {
+
+const db =
+    getFirestore(app);
+
+
+window.firebaseDB =
+    db;
+
+window.firebaseDoc =
+    doc;
+
+window.firebaseOnSnapshot =
+    onSnapshot;
+
+
+if(window.startScrapApp){
+
     window.startScrapApp();
+
+}
+else{
+
+    window.firebaseReady =
+        true;
+
 }
 
-/* Exact shared IDs used by admin-rates.html. */
-const SHARED_RATE_IDS = [
-    "Stainlesssteelsteel",
-    "paper",
-    "aluminium",
-    "copper",
-    "iron",
-    "battery",
-    "plastic",
-    "vehicle",
-    "tyre",
-    "ewaste",
-    "mixed"
-];
-
-window.firebaseRateIds = SHARED_RATE_IDS;
-window.firebaseRateDoc = ratesDocRef;
-window.firebaseRateOnSnapshot = onSnapshot;
 </script>
 
 
@@ -4665,49 +4689,109 @@ window.updateProductTranslations = function(){
 
 function startFirebaseRateListeners(){
 
-    /* Firestore is now the ONLY database used for scrap rates. */
-    const rateRef = window.firebaseRateDoc;
+    if(
+        !window.firebaseDB ||
+        !window.firebaseDoc ||
+        !window.firebaseOnSnapshot
+    ){
 
-    if(!rateRef){
-        console.error("Firestore rate document is not connected.");
-        materials.forEach(function(material){
-            firebaseRates[material.id] = 0;
-            updateProductRate(material.id, 0);
-        });
+        console.error(
+            "Firebase is not connected."
+        );
+
         return;
+
     }
 
-    window.firebaseRateOnSnapshot(
+
+    const rateRef =
+        window.firebaseDoc(
+
+            window.firebaseDB,
+
+            "covai hub",
+
+            "f9k5K0JaYiXmE8aZ5vdf"
+
+        );
+
+
+    window.firebaseOnSnapshot(
+
         rateRef,
+
         function(snapshot){
 
-            const data = snapshot.exists()
-                ? (snapshot.data() || {})
-                : {};
+            if(!snapshot.exists()){
 
-            console.log("COVAI SCRAP HUB Firestore rates loaded:", data);
+                console.warn(
+                    "Rate document not found"
+                );
 
-            materials.forEach(function(material){
+                materials.forEach(function(material){
+                    firebaseRates[material.id] = 0;
+                    updateProductRate(material.id, 0);
+                });
 
-                let value = data[material.id];
+                return;
 
-                const rate = Number(value) || 0;
+            }
 
-                firebaseRates[material.id] = rate;
-                updateProductRate(material.id, rate);
-            });
+
+            const data =
+                snapshot.data();
+
+
+            materials.forEach(
+                function(material){
+
+                    let rate =
+                        Number(
+                            data[
+                                material.id
+                            ] ?? 0
+                        );
+
+                    if(
+                        material.id === "plastic" &&
+                        (!Number.isFinite(rate) || rate <= 0) &&
+                        data.palstic !== undefined
+                    ){
+                        const legacyRate = Number(data.palstic);
+                        if(Number.isFinite(legacyRate)){
+                            rate = legacyRate;
+                        }
+                    }
+
+
+                    firebaseRates[
+                        material.id
+                    ] = rate;
+
+
+                    updateProductRate(
+                        material.id,
+                        rate
+                    );
+
+                }
+            );
+
         },
-        function(error){
-            console.error("Firestore rate error:", error);
 
-            /* Do not leave the customer page stuck forever. */
-            materials.forEach(function(material){
-                firebaseRates[material.id] = 0;
-                updateProductRate(material.id, 0);
-            });
+        function(error){
+
+            console.error(
+                "Firebase Error:",
+                error
+            );
+
         }
+
     );
+
 }
+
 
 /* =====================================================
    RENDER PRODUCTS
@@ -6572,7 +6656,593 @@ const notificationStatus =
     );
 */
 
-/* Notification code intentionally removed. */
+/*
+function notificationMessage(
+    message,
+    error = false
+){
+
+    if(!notificationStatus)
+        return;
+
+    notificationStatus.textContent =
+        message;
+
+    notificationStatus.className =
+        "notification-status show" +
+        (error ? " error" : "");
+
+}
+
+
+/* =====================================================
+   FIREBASE MESSAGING INITIALIZATION
+===================================================== */
+
+let messaging = null;
+
+let notificationDatabase = null;
+
+let notificationApp = null;
+
+
+try{
+
+    // Initialize separate Firebase app for notifications
+    notificationApp =
+        initializeApp(
+            notificationFirebaseConfig,
+            "notification-app"
+        );
+
+    messaging =
+        getMessaging(notificationApp);
+
+    notificationDatabase =
+        getDatabase(notificationApp);
+
+}catch(error){
+
+    console.error(
+        "FCM initialization error:",
+        error
+    );
+
+}
+
+
+/* =====================================================
+   UNREGISTER OLD SERVICE WORKERS
+===================================================== */
+
+async function unregisterOldServiceWorkers(){
+
+    if(!("serviceWorker" in navigator)){
+        return;
+    }
+
+    const registrations =
+        await navigator.serviceWorker.getRegistrations();
+
+    for(const registration of registrations){
+
+        await registration.unregister();
+
+        console.log(
+            "Unregistered old service worker:",
+            registration.scope
+        );
+
+    }
+
+}
+
+
+/* =====================================================
+   REGISTER SERVICE WORKER
+===================================================== */
+
+async function registerNotificationWorker(){
+
+    if(
+        !("serviceWorker" in navigator)
+    ){
+
+        throw new Error(
+            "Service Worker is not supported."
+        );
+
+    }
+
+
+    // First, unregister any old workers
+    await unregisterOldServiceWorkers();
+
+
+    // Get current page URL to determine correct path
+    const currentUrl =
+        window.location.pathname;
+
+    console.log("Current URL:", currentUrl);
+
+
+    // Try multiple paths
+    const paths = [
+        "/firebase-messaging-sw.js",
+        "./firebase-messaging-sw.js",
+        "../firebase-messaging-sw.js"
+    ];
+
+
+    let lastError = null;
+
+
+    for(const path of paths){
+
+        try{
+
+            // First check if file exists
+            const testResponse =
+                await fetch(path, {
+                    method: 'HEAD'
+                });
+
+            if(!testResponse.ok){
+                console.warn(
+                    `File not found at ${path}:`,
+                    testResponse.status
+                );
+                continue;
+            }
+
+            console.log(
+                `✓ Service worker file found at: ${path}`
+            );
+
+
+            // Now register
+            const registration =
+                await navigator.serviceWorker.register(
+                    path
+                );
+
+            console.log(
+                "✓ FCM Service Worker registered:",
+                registration.scope
+            );
+
+
+            return registration;
+
+        }
+        catch(error){
+
+            lastError = error;
+
+            console.warn(
+                `✗ Failed to register from ${path}:`,
+                error.message
+            );
+
+        }
+
+    }
+
+
+    // If all paths failed
+    throw new Error(
+        `Service Worker not found at any path. Last error: ${lastError?.message || 'Unknown'}.
+
+SOLUTION: Copy firebase-messaging-sw.js to your web server root directory.
+Current page: ${currentUrl}`
+    );
+
+}
+
+
+/* =====================================================
+   ENABLE NOTIFICATIONS
+===================================================== */
+
+async function enableNotifications(){
+
+    if(!messaging){
+
+        notificationMessage(
+            "Firebase Messaging is not initialized.",
+            true
+        );
+
+        return;
+
+    }
+
+
+    if(
+        !window.isSecureContext
+    ){
+
+        notificationMessage(
+            "Notifications require HTTPS.",
+            true
+        );
+
+        return;
+
+    }
+
+
+    notificationBtn.disabled =
+        true;
+
+    notificationBtn.textContent =
+        "Enabling...";
+
+
+    try{
+
+        /* ---------------------------------------------
+           ASK BROWSER PERMISSION
+        --------------------------------------------- */
+
+        const permission =
+            await Notification.requestPermission();
+
+
+        if(
+            permission !== "granted"
+        ){
+
+            throw new Error(
+                "Notification permission was not granted."
+            );
+
+        }
+
+
+        /* ---------------------------------------------
+           REGISTER SERVICE WORKER
+        --------------------------------------------- */
+
+        const registration =
+            await registerNotificationWorker();
+
+
+        /* ---------------------------------------------
+           GET FCM TOKEN
+        --------------------------------------------- */
+
+        const token =
+            await getToken(
+                messaging,
+                {
+                    vapidKey:
+                        VAPID_KEY,
+
+                    serviceWorkerRegistration:
+                        registration
+                }
+            );
+
+
+        if(!token){
+
+            throw new Error(
+                "FCM token was not generated."
+            );
+
+        }
+
+
+        console.log(
+            "FCM TOKEN:",
+            token
+        );
+
+
+        /* ---------------------------------------------
+           SAVE TOKEN
+        --------------------------------------------- */
+
+        /*
+           We use the token itself as the Firebase
+           database key.
+
+           This allows the admin/backend to later
+           broadcast to all registered devices.
+        */
+
+        const safeToken =
+            encodeURIComponent(
+                token
+            );
+
+
+        await set(
+
+            ref(
+                notificationDatabase,
+                "notificationTokens/" +
+                safeToken
+            ),
+
+            {
+
+                token:
+                    token,
+
+                enabled:
+                    true,
+
+                platform:
+                    "web",
+
+                browser:
+                    navigator.userAgent,
+
+                createdAt:
+                    Date.now(),
+
+                updatedAt:
+                    Date.now()
+
+            }
+
+        );
+
+
+        /* ---------------------------------------------
+           SUCCESS
+        --------------------------------------------- */
+
+        notificationBtn.textContent =
+            "✓ Notifications Enabled";
+
+        notificationBtn.disabled =
+            true;
+
+        notificationMessage(
+            "You're subscribed to COVAI SCRAP HUB updates."
+        );
+
+
+        localStorage.setItem(
+            "csh_notifications_enabled",
+            "true"
+        );
+
+
+        /* ---------------------------------------------
+           SEND TEST NOTIFICATION
+        --------------------------------------------- */
+
+        setTimeout(
+            function(){
+                sendTestNotification();
+            },
+            1000
+        );
+
+
+    }
+
+    catch(error){
+
+        console.error(
+            "Notification setup error:",
+            error
+        );
+
+
+        notificationBtn.disabled =
+            false;
+
+        notificationBtn.textContent =
+            "Enable Notifications";
+
+
+        // Provide specific error messages
+        let errorMsg =
+            "Unable to enable notifications.";
+
+        if(
+            error.message.includes(
+                "permission"
+            )
+        ){
+            errorMsg =
+                "Permission denied. Check browser settings.";
+        }
+        else if(
+            error.message.includes(
+                "Service Worker"
+            )
+        ){
+            errorMsg =
+                "Service Worker error. Refresh page and try again.";
+        }
+        else if(
+            error.message.includes(
+                "token"
+            )
+        ){
+            errorMsg =
+                "Failed to get notification token. Check HTTPS.";
+        }
+        else if(error.message){
+            errorMsg = error.message;
+        }
+
+
+        notificationMessage(
+            errorMsg,
+            true
+        );
+
+    }
+
+}
+
+
+/* =====================================================
+   TEST NOTIFICATION
+===================================================== */
+
+function sendTestNotification(){
+
+    if(
+        Notification.permission !==
+        "granted"
+    ){
+        return;
+    }
+
+    const notification =
+        new Notification(
+            "COVAI SCRAP HUB",
+            {
+                body:
+                    "Notifications are working! You'll get updates on scrap rates.",
+                icon:
+                    "/logo.jpeg",
+                badge:
+                    "/logo.jpeg",
+                tag:
+                    "test-notification"
+            }
+        );
+
+    setTimeout(
+        function(){
+            notification.close();
+        },
+        5000
+    );
+
+}
+
+
+/* =====================================================
+   BUTTON
+===================================================== */
+
+if(notificationBtn){
+
+    notificationBtn.addEventListener(
+        "click",
+        enableNotifications
+    );
+
+}
+
+
+/* =====================================================
+   FOREGROUND MESSAGE
+===================================================== */
+
+if(messaging){
+
+    onMessage(
+        messaging,
+        function(payload){
+
+            console.log(
+                "Foreground notification:",
+                payload
+            );
+
+
+            const title =
+                payload.notification?.title ||
+                "COVAI SCRAP HUB";
+
+
+            const body =
+                payload.notification?.body ||
+                "You have a new update.";
+
+
+            /*
+               When customer is currently viewing
+               customer.html, show a browser notification.
+            */
+
+            if(
+                Notification.permission ===
+                "granted"
+            ){
+
+                new Notification(
+                    title,
+                    {
+
+                        body:
+                            body,
+
+                        icon:
+                            "/logo.jpeg"
+
+                    }
+                );
+
+            }
+
+        }
+    );
+
+}
+
+
+/* =====================================================
+   REMEMBER ENABLED STATE
+===================================================== */
+
+window.addEventListener('DOMContentLoaded', function(){
+
+    if(!notificationBtn){
+        console.error('Notification button not found');
+        return;
+    }
+
+    // Check if already enabled
+    if(
+        localStorage.getItem(
+            "csh_notifications_enabled"
+        ) === "true" &&
+        Notification.permission ===
+        "granted"
+    ){
+
+        notificationBtn.textContent =
+            "✓ Notifications Enabled";
+
+        notificationBtn.disabled =
+            true;
+
+        notificationMessage(
+            "Notifications are active"
+        );
+
+    }
+
+    // Check if permission denied
+    if(Notification.permission === "denied"){
+
+        notificationBtn.textContent =
+            "Permission Denied";
+
+        notificationBtn.disabled =
+            true;
+
+        notificationMessage(
+            "Enable notifications in browser settings",
+            true
+        );
+
+    }
+
+});
+*/
 
 </script>
 
