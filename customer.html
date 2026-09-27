@@ -4726,44 +4726,30 @@ function startFirebaseRateListeners(){
             console.log("COVAI SCRAP HUB rates loaded:", data);
 
             /*
-               Rates are stored by admin-rates.html as:
-               scrapRates / rates / {materialId} / price
+               SHARED RATE STRUCTURE — SAME AS admin-rates.html
 
-               Keep compatibility with older rate data too, including
-               the old "steel" id used by the admin defaults.
+               scrapRates
+                 └── rates
+                     └── {exact material ID}
+                         ├── name
+                         ├── price
+                         └── unit
+
+               No Firestore data and no old rate IDs are used here.
             */
             const rates =
-                data.rates || data;
+                data.rates || {};
 
             materials.forEach(
                 function(material){
 
-                    let rateData =
+                    const rateData =
                         rates[material.id];
-
-                    /* Customer page uses Stainlesssteelsteel,
-                       while the existing admin default uses steel. */
-                    if(
-                        !rateData &&
-                        material.id === "Stainlesssteelsteel"
-                    ){
-                        rateData =
-                            rates.steel;
-                    }
-
-                    /* Accept a few legacy naming variations safely. */
-                    if(
-                        !rateData &&
-                        material.id === "ewaste"
-                    ){
-                        rateData =
-                            rates.eWaste || rates.e_waste;
-                    }
 
                     const rate =
                         Number(
                             rateData && typeof rateData === "object"
-                                ? (rateData.price ?? rateData.rate ?? rateData.value)
+                                ? rateData.price
                                 : rateData
                         ) || 0;
 
