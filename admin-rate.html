@@ -78,169 +78,348 @@ input:focus{outline:none;border-color:var(--green);box-shadow:0 0 0 3px rgba(16,
 <div id="toast" class="toast"></div>
 
 <script type="module">
-import {initializeApp} from "https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js";
-import {getDatabase,ref,onValue,set,update,remove} from "https://www.gstatic.com/firebasejs/12.18.0/firebase-database.js";
-
-const firebaseConfig={
- apiKey:"AIzaSyCAVdbE2YfcRUEizM9qhp3HMAdY2fEDUsc",
- authDomain:"covaiscrap.firebaseapp.com",
- databaseURL:"https://covaiscrap-default-rtdb.firebaseio.com",
- projectId:"covaiscrap",
- storageBucket:"covaiscrap.firebasestorage.app",
- messagingSenderId:"1093933670685",
- appId:"1:1093933670685:web:e305d3ed1e4f62e269c1f4",
- measurementId:"G-MCXYBSB57M"
-};
-const app=initializeApp(firebaseConfig),db=getDatabase(app),ratesRef=ref(db,"scrapRates");
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js";
+import {
+  getDatabase,
+  ref,
+  onValue,
+  get,
+  set,
+  update,
+  remove
+} from "https://www.gstatic.com/firebasejs/12.18.0/firebase-database.js";
 
 /* =========================================================
-   SHARED RATE IDS
-   These IDs MUST match customer.html exactly.
+   COVAI SCRAP HUB - SHARED RATE DATABASE
+   Firebase project: covaiscrap
+   RTDB path: scrapRates/rates
+   These IDs MUST stay identical in admin-rates.html
+   and customer.html.
 ========================================================= */
-const defaults=[
- {id:"Stainlesssteelsteel",name:"Stainless Steel Scrap",price:45,unit:"kg",emoji:"🔩"},
- {id:"paper",name:"Paper Scrap",price:12,unit:"kg",emoji:"📰"},
- {id:"aluminium",name:"Aluminium Scrap",price:85,unit:"kg",emoji:"🥫"},
- {id:"copper",name:"Copper Scrap",price:420,unit:"kg",emoji:"🔶"},
- {id:"iron",name:"Iron Scrap",price:25,unit:"kg",emoji:"⚙️"},
- {id:"battery",name:"Old Battery",price:50,unit:"kg",emoji:"🔋"},
- {id:"plastic",name:"Plastic Scrap",price:8,unit:"kg",emoji:"📦"},
- {id:"vehicle",name:"Old Vehicle",price:35000,unit:"unit",emoji:"🚗"},
- {id:"tyre",name:"Tyre Waste",price:0,unit:"kg",emoji:"🛞"},
- {id:"ewaste",name:"E-Waste",price:15,unit:"kg",emoji:"💻"},
- {id:"mixed",name:"Mixed Scrap",price:0,unit:"kg",emoji:"♻️"}
+const firebaseConfig = {
+  apiKey: "AIzaSyCAVdbE2YfcRUEizM9qhp3HMAdY2fEDUsc",
+  authDomain: "covaiscrap.firebaseapp.com",
+  databaseURL: "https://covaiscrap-default-rtdb.firebaseio.com",
+  projectId: "covaiscrap",
+  storageBucket: "covaiscrap.firebasestorage.app",
+  messagingSenderId: "1093933670685",
+  appId: "1:1093933670685:web:e305d3ed1e4f62e269c1f4",
+  measurementId: "G-MCXYBSB57M"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app, firebaseConfig.databaseURL);
+const ratesRef = ref(db, "scrapRates");
+const ratesOnlyRef = ref(db, "scrapRates/rates");
+
+/* EXACT shared IDs */
+const defaults = [
+  { id: "Stainlesssteelsteel", name: "Stainless Steel Scrap", price: 45, unit: "kg", emoji: "🔩" },
+  { id: "paper", name: "Paper Scrap", price: 12, unit: "kg", emoji: "📰" },
+  { id: "aluminium", name: "Aluminium Scrap", price: 85, unit: "kg", emoji: "🥫" },
+  { id: "copper", name: "Copper Scrap", price: 420, unit: "kg", emoji: "🔶" },
+  { id: "iron", name: "Iron Scrap", price: 25, unit: "kg", emoji: "⚙️" },
+  { id: "battery", name: "Old Battery", price: 50, unit: "kg", emoji: "🔋" },
+  { id: "plastic", name: "Plastic Scrap", price: 8, unit: "kg", emoji: "📦" },
+  { id: "vehicle", name: "Old Vehicle", price: 35000, unit: "unit", emoji: "🚗" },
+  { id: "tyre", name: "Tyre Waste", price: 0, unit: "kg", emoji: "🛞" },
+  { id: "ewaste", name: "E-Waste", price: 15, unit: "kg", emoji: "💻" },
+  { id: "mixed", name: "Mixed Scrap", price: 0, unit: "kg", emoji: "♻️" }
 ];
-const emojiMap=Object.fromEntries(defaults.map(x=>[x.id,x.emoji]));
 
-function esc(v){return String(v??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]))}
-function dateText(v){
- if(!v)return "Never updated";
- const d=new Date(v);if(Number.isNaN(d.getTime()))return String(v);
- return d.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"});
-}
-function toast(msg){
- const t=document.getElementById("toast");t.textContent=msg;t.classList.add("show");
- clearTimeout(window.toastTimer);window.toastTimer=setTimeout(()=>t.classList.remove("show"),2200);
-}
-function slug(s){return String(s).toLowerCase().trim().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"")||Date.now().toString()}
+const sharedIds = new Set(defaults.map(x => x.id));
+const emojiMap = Object.fromEntries(defaults.map(x => [x.id, x.emoji]));
 
-async function ensureDefaults(){
- const snap=await new Promise((resolve,reject)=>{
-   onValue(ratesRef,resolve,error=>reject(error),{onlyOnce:true});
- });
- const current=snap.val()||{};
- const existing=current.rates||{};
- const rates={};
- let changed=false;
-
- /* Keep ONLY the exact shared material IDs used by customer.html. */
- defaults.forEach(x=>{
-   const old=existing[x.id];
-   if(old && typeof old === "object"){
-     rates[x.id]={
-       name:old.name||x.name,
-       price:Number.isFinite(Number(old.price)) ? Number(old.price) : x.price,
-       unit:old.unit||x.unit
-     };
-   }else{
-     rates[x.id]={name:x.name,price:x.price,unit:x.unit};
-   }
- });
-
- const oldKeys=Object.keys(existing);
- const newKeys=Object.keys(rates);
- if(oldKeys.length!==newKeys.length || oldKeys.some(k=>!Object.prototype.hasOwnProperty.call(rates,k))){
-   changed=true;
- }
- for(const id of newKeys){
-   const a=existing[id],b=rates[id];
-   if(!a || typeof a!="object" || Number(a.price)!==Number(b.price) || a.name!==b.name || a.unit!==b.unit){
-     changed=true;
-     break;
-   }
- }
-
- if(changed || !snap.exists() || !current.rates){
-   await set(ratesRef,{
-     rates,
-     lastUpdated:new Date().toISOString()
-   });
- }
+function esc(v) {
+  return String(v ?? "").replace(/[&<>"']/g, m => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#039;"
+  }[m]));
 }
 
-function render(data){
- document.getElementById("loading").style.display="none";
- const rates=data?.rates||{};
- document.getElementById("updateDate").textContent="Last updated • "+dateText(data?.lastUpdated);
- const box=document.getElementById("ratesContainer");
- const keys=Object.keys(rates);
- if(!keys.length){box.innerHTML='<div class="panel">No rates available.</div>';return}
- box.innerHTML=keys.map((id,i)=>{
-   const r=rates[id]||{};
-   return `<div class="rate-item">
-    <div class="icon">${emojiMap[id]||"♻️"}</div>
-    <div><div class="name">${esc(r.name||id)}</div><div class="unit">per ${esc(r.unit||"kg")}</div></div>
-    <input class="price-input" type="number" min="0" step="0.01" id="price-${esc(id)}" value="${Number(r.price||0).toFixed(2)}">
-    <button class="btn btn-blue small-btn update-rate" data-id="${esc(id)}">Save</button>
-    <button class="btn btn-red small-btn delete-rate" data-id="${esc(id)}">Delete</button>
-   </div>`;
- }).join("");
+function dateText(v) {
+  if (!v) return "Never updated";
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return String(v);
+  return d.toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
 }
 
-onValue(ratesRef,snap=>render(snap.val()),err=>{
- document.getElementById("loading").textContent="Unable to load Firebase data.";
- console.error(err);
+function toast(msg) {
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  clearTimeout(window.toastTimer);
+  window.toastTimer = setTimeout(() => t.classList.remove("show"), 2500);
+}
+
+function setLoading(message) {
+  const el = document.getElementById("loading");
+  el.style.display = "block";
+  el.innerHTML = `<div class="spinner"></div>${esc(message)}`;
+}
+
+function normalizeRate(existing, fallback) {
+  if (existing && typeof existing === "object") {
+    const n = Number(existing.price);
+    return {
+      name: String(existing.name || fallback.name),
+      price: Number.isFinite(n) ? n : fallback.price,
+      unit: String(existing.unit || fallback.unit)
+    };
+  }
+
+  const n = Number(existing);
+  return {
+    name: fallback.name,
+    price: Number.isFinite(n) ? n : fallback.price,
+    unit: fallback.unit
+  };
+}
+
+/*
+   One-time migration/normalization:
+   - steel -> Stainlesssteelsteel
+   - removes brass
+   - creates missing shared IDs
+   - preserves existing prices whenever possible
+   - leaves ONLY the 11 shared IDs under scrapRates/rates
+*/
+async function normalizeDatabase() {
+  const snap = await get(ratesRef);
+  const root = snap.exists() ? (snap.val() || {}) : {};
+  const existing = root.rates && typeof root.rates === "object" ? root.rates : {};
+
+  const normalized = {};
+
+  for (const item of defaults) {
+    let source = existing[item.id];
+
+    /* Migrate the old Firebase ID `steel` into the exact shared ID. */
+    if (item.id === "Stainlesssteelsteel" && source == null && existing.steel != null) {
+      source = existing.steel;
+    }
+
+    normalized[item.id] = normalizeRate(source, item);
+  }
+
+  const oldKeys = Object.keys(existing);
+  const newKeys = Object.keys(normalized);
+  const sameKeys = oldKeys.length === newKeys.length &&
+    oldKeys.every(k => sharedIds.has(k));
+
+  let changed = !sameKeys;
+
+  if (!changed) {
+    for (const item of defaults) {
+      const a = normalizeRate(existing[item.id], item);
+      const b = normalized[item.id];
+      if (a.name !== b.name || a.price !== b.price || a.unit !== b.unit) {
+        changed = true;
+        break;
+      }
+    }
+  }
+
+  if (changed || !snap.exists()) {
+    await set(ratesRef, {
+      rates: normalized,
+      lastUpdated: root.lastUpdated || new Date().toISOString()
+    });
+  }
+
+  return normalized;
+}
+
+function render(data) {
+  document.getElementById("loading").style.display = "none";
+
+  const rates = data && data.rates && typeof data.rates === "object" ? data.rates : {};
+  document.getElementById("updateDate").textContent =
+    "Last updated • " + dateText(data && data.lastUpdated);
+
+  const box = document.getElementById("ratesContainer");
+
+  /* Always render in the same order as the shared IDs. */
+  box.innerHTML = defaults.map(item => {
+    const r = rates[item.id] || item;
+    const price = Number(r.price);
+    const safePrice = Number.isFinite(price) ? price : 0;
+
+    return `<div class="rate-item">
+      <div class="icon">${item.emoji}</div>
+      <div>
+        <div class="name">${esc(r.name || item.name)}</div>
+        <div class="unit">per ${esc(r.unit || item.unit)}</div>
+      </div>
+      <input class="price-input"
+             type="number"
+             min="0"
+             step="0.01"
+             id="price-${esc(item.id)}"
+             value="${safePrice}">
+      <button class="btn btn-blue small-btn update-rate" data-id="${esc(item.id)}">Save</button>
+      <button class="btn btn-red small-btn delete-rate" data-id="${esc(item.id)}">Reset</button>
+    </div>`;
+  }).join("");
+}
+
+/* Firebase connection + live listener */
+onValue(
+  ratesRef,
+  snapshot => {
+    render(snapshot.val() || {});
+  },
+  error => {
+    console.error("COVAI SCRAP HUB Firebase read error:", error);
+    setLoading("Firebase read failed: " + (error?.message || "Permission denied"));
+    toast("Firebase read failed");
+  }
+);
+
+/* Normalize legacy data without deleting valid prices. */
+normalizeDatabase().catch(error => {
+  console.error("Rate database setup failed:", error);
+  setLoading("Firebase setup failed: " + (error?.message || "Check RTDB rules"));
+  toast("Firebase setup failed");
 });
-ensureDefaults().catch(console.error);
 
-document.getElementById("ratesContainer").addEventListener("click",async e=>{
- const save=e.target.closest(".update-rate"),del=e.target.closest(".delete-rate");
- if(save){
-   const id=save.dataset.id, input=document.getElementById("price-"+id), price=parseFloat(input.value);
-   if(!Number.isFinite(price)||price<0){toast("Enter a valid price");return}
-   save.disabled=true;
-   try{await update(ref(db,`scrapRates/rates/${id}`),{price});await set(ref(db,"scrapRates/lastUpdated"),new Date().toISOString());toast("✓ Rate updated")}
-   catch(err){toast("Update failed");console.error(err)} finally{save.disabled=false}
- }
- if(del){
-   const id=del.dataset.id;
-   if(!confirm("Delete this material rate?"))return;
-   try{await remove(ref(db,`scrapRates/rates/${id}`));await set(ref(db,"scrapRates/lastUpdated"),new Date().toISOString());toast("✓ Rate deleted")}
-   catch(err){toast("Delete failed");console.error(err)}
- }
+/* Save one rate */
+document.getElementById("ratesContainer").addEventListener("click", async event => {
+  const save = event.target.closest(".update-rate");
+  const reset = event.target.closest(".delete-rate");
+
+  if (save) {
+    const id = save.dataset.id;
+    const input = document.getElementById("price-" + id);
+    const price = Number.parseFloat(input.value);
+
+    if (!sharedIds.has(id)) {
+      toast("Invalid material ID");
+      return;
+    }
+    if (!Number.isFinite(price) || price < 0) {
+      toast("Enter a valid price");
+      return;
+    }
+
+    save.disabled = true;
+    try {
+      await update(ref(db, "scrapRates/rates/" + id), { price });
+      await set(ref(db, "scrapRates/lastUpdated"), new Date().toISOString());
+      toast("✓ Rate updated");
+    } catch (error) {
+      console.error(error);
+      toast("Update failed: " + (error?.message || "permission denied"));
+    } finally {
+      save.disabled = false;
+    }
+  }
+
+  if (reset) {
+    const id = reset.dataset.id;
+    const item = defaults.find(x => x.id === id);
+    if (!item) return;
+
+    if (!confirm(`Reset ${item.name} to ₹${item.price}?`)) return;
+
+    reset.disabled = true;
+    try {
+      await set(ref(db, "scrapRates/rates/" + id), {
+        name: item.name,
+        price: item.price,
+        unit: item.unit
+      });
+      await set(ref(db, "scrapRates/lastUpdated"), new Date().toISOString());
+      toast("✓ Rate reset");
+    } catch (error) {
+      console.error(error);
+      toast("Reset failed: " + (error?.message || "permission denied"));
+    } finally {
+      reset.disabled = false;
+    }
+  }
 });
 
-document.getElementById("addBtn").onclick=async()=>{
- const name=document.getElementById("materialName").value.trim();
- const price=parseFloat(document.getElementById("materialPrice").value);
- const unit=document.getElementById("materialUnit").value.trim()||"kg";
- if(!name||!Number.isFinite(price)||price<0){toast("Enter material and valid price");return}
- const match=defaults.find(x=>x.name.toLowerCase()===name.toLowerCase() || x.id.toLowerCase()===name.toLowerCase());
- if(!match){
-   toast("Use one of the existing shared materials");
-   return;
- }
- const id=match.id;
- try{
-   await update(ref(db,"scrapRates"),{[`rates/${id}`]:{name:match.name,price,unit},lastUpdated:new Date().toISOString()});
-   document.getElementById("materialName").value="";
-   document.getElementById("materialPrice").value="";
-   document.getElementById("materialUnit").value="kg";
-   toast("✓ Rate added");
- }catch(err){toast("Add failed");console.error(err)}
-};
+/* Add/update one of the exact shared materials */
+document.getElementById("addBtn").addEventListener("click", async () => {
+  const nameInput = document.getElementById("materialName");
+  const priceInput = document.getElementById("materialPrice");
+  const unitInput = document.getElementById("materialUnit");
 
-document.getElementById("updateAllBtn").onclick=async()=>{
- const inputs=[...document.querySelectorAll(".price-input")],updates={};
- for(const input of inputs){
-   const id=input.id.replace("price-","");
-   const price=parseFloat(input.value);
-   if(!Number.isFinite(price)||price<0){toast("Check all prices");return}
-   updates[`rates/${id}/price`]=price;
- }
- try{await update(ratesRef,{...updates,lastUpdated:new Date().toISOString()});toast("✓ All rates updated")}
- catch(err){toast("Update All failed");console.error(err)}
-};
+  const name = nameInput.value.trim();
+  const price = Number.parseFloat(priceInput.value);
+  const unit = unitInput.value.trim() || "kg";
+
+  if (!name || !Number.isFinite(price) || price < 0) {
+    toast("Enter material and valid price");
+    return;
+  }
+
+  const match = defaults.find(item =>
+    item.id.toLowerCase() === name.toLowerCase() ||
+    item.name.toLowerCase() === name.toLowerCase()
+  );
+
+  if (!match) {
+    toast("Use an existing shared material ID/name");
+    return;
+  }
+
+  try {
+    await set(ref(db, "scrapRates/rates/" + match.id), {
+      name: match.name,
+      price,
+      unit
+    });
+    await set(ref(db, "scrapRates/lastUpdated"), new Date().toISOString());
+
+    nameInput.value = "";
+    priceInput.value = "";
+    unitInput.value = "kg";
+    toast("✓ Rate saved");
+  } catch (error) {
+    console.error(error);
+    toast("Save failed: " + (error?.message || "permission denied"));
+  }
+});
+
+/* Update every shared material in one atomic RTDB update. */
+document.getElementById("updateAllBtn").addEventListener("click", async () => {
+  const updates = {};
+
+  for (const item of defaults) {
+    const input = document.getElementById("price-" + item.id);
+    const price = Number.parseFloat(input?.value);
+
+    if (!Number.isFinite(price) || price < 0) {
+      toast(`Check ${item.name} price`);
+      return;
+    }
+
+    updates[`rates/${item.id}/price`] = price;
+    updates[`rates/${item.id}/name`] = item.name;
+    updates[`rates/${item.id}/unit`] = item.unit;
+  }
+
+  updates["lastUpdated"] = new Date().toISOString();
+
+  try {
+    await update(ratesRef, updates);
+    toast("✓ All rates updated");
+  } catch (error) {
+    console.error(error);
+    toast("Update All failed: " + (error?.message || "permission denied"));
+  }
+});
 </script>
 </body>
 </html>
