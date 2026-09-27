@@ -80,37 +80,37 @@ input:focus{outline:none;border-color:var(--green);box-shadow:0 0 0 3px rgba(16,
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js";
 import {
-  getDatabase,
-  ref,
-  onValue,
-  get,
-  set,
-  update,
-  remove
-} from "https://www.gstatic.com/firebasejs/12.18.0/firebase-database.js";
+  getFirestore,
+  doc,
+  getDoc,
+  onSnapshot,
+  updateDoc,
+  setDoc,
+  deleteField
+} from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 
 /* =========================================================
-   COVAI SCRAP HUB - SHARED RATE DATABASE
-   Firebase project: covaiscrap
-   RTDB path: scrapRates/rates
-   These IDs MUST stay identical in admin-rates.html
-   and customer.html.
+   COVAI SCRAP HUB - FIRESTORE RATE DATABASE
+   Project: covaiscrap
+   Collection: covai hub
+   Document: f9k5K0JaYiXmE8aZ5vdf
+
+   IMPORTANT: Admin and Customer use the SAME 11 material IDs
+   and the SAME Firestore document.
 ========================================================= */
 const firebaseConfig = {
-  apiKey: "AIzaSyCAVdbE2YfcRUEizM9qhp3HMAdY2fEDUsc",
-  authDomain: "covaiscrap.firebaseapp.com",
-  databaseURL: "https://covaiscrap-default-rtdb.firebaseio.com",
-  projectId: "covaiscrap",
-  storageBucket: "covaiscrap.firebasestorage.app",
-  messagingSenderId: "1093933670685",
-  appId: "1:1093933670685:web:e305d3ed1e4f62e269c1f4",
-  measurementId: "G-MCXYBSB57M"
+  apiKey: "AIzaSyApJhYmo0pHNqVD0XIyOlQDqDzACztPdHA",
+  authDomain: "covai-scrap-hub.firebaseapp.com",
+  projectId: "covai-scrap-hub",
+  storageBucket: "covai-scrap-hub.firebasestorage.app",
+  messagingSenderId: "979133721874",
+  appId: "1:979133721874:web:c5829bb8dbf5270c0917cb",
+  measurementId: "G-P3PTSBHWMF"
 };
 
 const app = initializeApp(firebaseConfig);
-const db = getDatabase(app, firebaseConfig.databaseURL);
-const ratesRef = ref(db, "scrapRates");
-const ratesOnlyRef = ref(db, "scrapRates/rates");
+const db = getFirestore(app);
+const ratesDocRef = doc(db, "covai hub", "f9k5K0JaYiXmE8aZ5vdf");
 
 /* EXACT shared IDs */
 const defaults = [
@@ -128,28 +128,21 @@ const defaults = [
 ];
 
 const sharedIds = new Set(defaults.map(x => x.id));
-const emojiMap = Object.fromEntries(defaults.map(x => [x.id, x.emoji]));
 
 function esc(v) {
   return String(v ?? "").replace(/[&<>"']/g, m => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#039;"
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;"
   }[m]));
 }
 
 function dateText(v) {
   if (!v) return "Never updated";
+  if (typeof v?.toDate === "function") v = v.toDate();
   const d = new Date(v);
   if (Number.isNaN(d.getTime())) return String(v);
   return d.toLocaleDateString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit"
+    day: "2-digit", month: "short", year: "numeric",
+    hour: "2-digit", minute: "2-digit"
   });
 }
 
@@ -167,129 +160,94 @@ function setLoading(message) {
   el.innerHTML = `<div class="spinner"></div>${esc(message)}`;
 }
 
-function normalizeRate(existing, fallback) {
-  if (existing && typeof existing === "object") {
-    const n = Number(existing.price);
-    return {
-      name: String(existing.name || fallback.name),
-      price: Number.isFinite(n) ? n : fallback.price,
-      unit: String(existing.unit || fallback.unit)
-    };
-  }
-
-  const n = Number(existing);
-  return {
-    name: fallback.name,
-    price: Number.isFinite(n) ? n : fallback.price,
-    unit: fallback.unit
-  };
+function numericRate(value, fallback) {
+  if (value && typeof value === "object" && value.price != null) value = value.price;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
 }
 
-/*
-   One-time migration/normalization:
-   - steel -> Stainlesssteelsteel
-   - removes brass
-   - creates missing shared IDs
-   - preserves existing prices whenever possible
-   - leaves ONLY the 11 shared IDs under scrapRates/rates
-*/
-async function normalizeDatabase() {
-  const snap = await get(ratesRef);
-  const root = snap.exists() ? (snap.val() || {}) : {};
-  const existing = root.rates && typeof root.rates === "object" ? root.rates : {};
+function buildRates(data) {
+  const rates = {};
+  for (const item of defaults) {
+    let value = data?.[item.id];
+    /* Migrate the old Firestore field `steel` to the shared ID. */
+    if (item.id === "Stainlesssteelsteel" && value == null && data?.steel != null) {
+      value = data.steel;
+    }
+    rates[item.id] = numericRate(value, item.price);
+  }
+  return rates;
+}
 
-  const normalized = {};
+async function ensureFirestoreRateFields() {
+  const snap = await getDoc(ratesDocRef);
+  const data = snap.exists() ? (snap.data() || {}) : {};
+  const updates = {};
 
   for (const item of defaults) {
-    let source = existing[item.id];
-
-    /* Migrate the old Firebase ID `steel` into the exact shared ID. */
-    if (item.id === "Stainlesssteelsteel" && source == null && existing.steel != null) {
-      source = existing.steel;
+    let value = data[item.id];
+    if (item.id === "Stainlesssteelsteel" && value == null && data.steel != null) {
+      value = data.steel;
     }
-
-    normalized[item.id] = normalizeRate(source, item);
-  }
-
-  const oldKeys = Object.keys(existing);
-  const newKeys = Object.keys(normalized);
-  const sameKeys = oldKeys.length === newKeys.length &&
-    oldKeys.every(k => sharedIds.has(k));
-
-  let changed = !sameKeys;
-
-  if (!changed) {
-    for (const item of defaults) {
-      const a = normalizeRate(existing[item.id], item);
-      const b = normalized[item.id];
-      if (a.name !== b.name || a.price !== b.price || a.unit !== b.unit) {
-        changed = true;
-        break;
-      }
+    const price = numericRate(value, item.price);
+    if (data[item.id] == null || typeof data[item.id] !== "number") {
+      updates[item.id] = price;
     }
   }
 
-  if (changed || !snap.exists()) {
-    await set(ratesRef, {
-      rates: normalized,
-      lastUpdated: root.lastUpdated || new Date().toISOString()
-    });
-  }
+  /* Remove legacy rate fields only. Other Firestore data is untouched. */
+  if (data.steel != null) updates.steel = deleteField();
+  if (data.brass != null) updates.brass = deleteField();
 
-  return normalized;
+  updates.lastUpdated = data.lastUpdated || new Date().toISOString();
+
+  if (!snap.exists()) {
+    await setDoc(ratesDocRef, Object.fromEntries(defaults.map(item => [item.id, item.price]).concat([["lastUpdated", new Date().toISOString()]])), { merge: true });
+  } else if (Object.keys(updates).length) {
+    await updateDoc(ratesDocRef, updates);
+  }
 }
 
 function render(data) {
   document.getElementById("loading").style.display = "none";
 
-  const rates = data && data.rates && typeof data.rates === "object" ? data.rates : {};
+  const rates = buildRates(data || {});
   document.getElementById("updateDate").textContent =
-    "Last updated • " + dateText(data && data.lastUpdated);
+    "Last updated • " + dateText(data?.lastUpdated);
 
   const box = document.getElementById("ratesContainer");
-
-  /* Always render in the same order as the shared IDs. */
   box.innerHTML = defaults.map(item => {
-    const r = rates[item.id] || item;
-    const price = Number(r.price);
-    const safePrice = Number.isFinite(price) ? price : 0;
-
+    const price = rates[item.id];
     return `<div class="rate-item">
       <div class="icon">${item.emoji}</div>
       <div>
-        <div class="name">${esc(r.name || item.name)}</div>
-        <div class="unit">per ${esc(r.unit || item.unit)}</div>
+        <div class="name">${esc(item.name)}</div>
+        <div class="unit">per ${esc(item.unit)}</div>
       </div>
-      <input class="price-input"
-             type="number"
-             min="0"
-             step="0.01"
-             id="price-${esc(item.id)}"
-             value="${safePrice}">
+      <input class="price-input" type="number" min="0" step="0.01"
+             id="price-${esc(item.id)}" value="${price}">
       <button class="btn btn-blue small-btn update-rate" data-id="${esc(item.id)}">Save</button>
       <button class="btn btn-red small-btn delete-rate" data-id="${esc(item.id)}">Reset</button>
     </div>`;
   }).join("");
 }
 
-/* Firebase connection + live listener */
-onValue(
-  ratesRef,
+/* Live Firestore listener. */
+onSnapshot(
+  ratesDocRef,
   snapshot => {
-    render(snapshot.val() || {});
+    render(snapshot.exists() ? snapshot.data() : {});
   },
   error => {
-    console.error("COVAI SCRAP HUB Firebase read error:", error);
-    setLoading("Firebase read failed: " + (error?.message || "Permission denied"));
-    toast("Firebase read failed");
+    console.error("COVAI SCRAP HUB Firestore read error:", error);
+    setLoading("Firestore read failed: " + (error?.message || "Permission denied"));
+    toast("Firestore read failed");
   }
 );
 
-/* Normalize legacy data without deleting valid prices. */
-normalizeDatabase().catch(error => {
-  console.error("Rate database setup failed:", error);
-  setLoading("Firebase setup failed: " + (error?.message || "Check RTDB rules"));
-  toast("Firebase setup failed");
+ensureFirestoreRateFields().catch(error => {
+  console.error("Firestore rate setup failed:", error);
+  toast("Firestore setup failed: " + (error?.message || "Check Firestore rules"));
 });
 
 /* Save one rate */
@@ -302,19 +260,15 @@ document.getElementById("ratesContainer").addEventListener("click", async event 
     const input = document.getElementById("price-" + id);
     const price = Number.parseFloat(input.value);
 
-    if (!sharedIds.has(id)) {
-      toast("Invalid material ID");
-      return;
-    }
-    if (!Number.isFinite(price) || price < 0) {
-      toast("Enter a valid price");
-      return;
-    }
+    if (!sharedIds.has(id)) return toast("Invalid material ID");
+    if (!Number.isFinite(price) || price < 0) return toast("Enter a valid price");
 
     save.disabled = true;
     try {
-      await update(ref(db, "scrapRates/rates/" + id), { price });
-      await set(ref(db, "scrapRates/lastUpdated"), new Date().toISOString());
+      await updateDoc(ratesDocRef, {
+        [id]: price,
+        lastUpdated: new Date().toISOString()
+      });
       toast("✓ Rate updated");
     } catch (error) {
       console.error(error);
@@ -328,17 +282,14 @@ document.getElementById("ratesContainer").addEventListener("click", async event 
     const id = reset.dataset.id;
     const item = defaults.find(x => x.id === id);
     if (!item) return;
-
     if (!confirm(`Reset ${item.name} to ₹${item.price}?`)) return;
 
     reset.disabled = true;
     try {
-      await set(ref(db, "scrapRates/rates/" + id), {
-        name: item.name,
-        price: item.price,
-        unit: item.unit
+      await updateDoc(ratesDocRef, {
+        [id]: item.price,
+        lastUpdated: new Date().toISOString()
       });
-      await set(ref(db, "scrapRates/lastUpdated"), new Date().toISOString());
       toast("✓ Rate reset");
     } catch (error) {
       console.error(error);
@@ -349,7 +300,7 @@ document.getElementById("ratesContainer").addEventListener("click", async event 
   }
 });
 
-/* Add/update one of the exact shared materials */
+/* Add/update one of the exact shared materials. */
 document.getElementById("addBtn").addEventListener("click", async () => {
   const nameInput = document.getElementById("materialName");
   const priceInput = document.getElementById("materialPrice");
@@ -369,19 +320,13 @@ document.getElementById("addBtn").addEventListener("click", async () => {
     item.name.toLowerCase() === name.toLowerCase()
   );
 
-  if (!match) {
-    toast("Use an existing shared material ID/name");
-    return;
-  }
+  if (!match) return toast("Use an existing shared material ID/name");
 
   try {
-    await set(ref(db, "scrapRates/rates/" + match.id), {
-      name: match.name,
-      price,
-      unit
+    await updateDoc(ratesDocRef, {
+      [match.id]: price,
+      lastUpdated: new Date().toISOString()
     });
-    await set(ref(db, "scrapRates/lastUpdated"), new Date().toISOString());
-
     nameInput.value = "";
     priceInput.value = "";
     unitInput.value = "kg";
@@ -392,28 +337,22 @@ document.getElementById("addBtn").addEventListener("click", async () => {
   }
 });
 
-/* Update every shared material in one atomic RTDB update. */
+/* Update all 11 rates in one Firestore write. */
 document.getElementById("updateAllBtn").addEventListener("click", async () => {
-  const updates = {};
+  const updates = { lastUpdated: new Date().toISOString() };
 
   for (const item of defaults) {
     const input = document.getElementById("price-" + item.id);
     const price = Number.parseFloat(input?.value);
-
     if (!Number.isFinite(price) || price < 0) {
       toast(`Check ${item.name} price`);
       return;
     }
-
-    updates[`rates/${item.id}/price`] = price;
-    updates[`rates/${item.id}/name`] = item.name;
-    updates[`rates/${item.id}/unit`] = item.unit;
+    updates[item.id] = price;
   }
 
-  updates["lastUpdated"] = new Date().toISOString();
-
   try {
-    await update(ratesRef, updates);
+    await updateDoc(ratesDocRef, updates);
     toast("✓ All rates updated");
   } catch (error) {
     console.error(error);
